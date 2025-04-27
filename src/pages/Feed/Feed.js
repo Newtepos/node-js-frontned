@@ -41,12 +41,12 @@ class Feed extends Component {
 
     this.loadPosts();
 
-    const socket = io('http://localhost:8080');
-    socket.on('posts', postsData => {
-      if (postsData.action === 'create') this.addPost(postsData.post);
-      if (postsData.action === 'update') this.updatePost(postsData.post);
-      if (postsData.action === 'delete') this.loadPosts()
-    });
+    // const socket = io('http://localhost:8080');
+    // socket.on('posts', postsData => {
+    //   if (postsData.action === 'create') this.addPost(postsData.post);
+    //   if (postsData.action === 'update') this.updatePost(postsData.post);
+    //   if (postsData.action === 'delete') this.loadPosts()
+    // });
   }
 
   addPost = post => {
@@ -91,21 +91,46 @@ class Feed extends Component {
       page--;
       this.setState({ postPage: page });
     }
-    fetch('http://localhost:8080/feed/posts?page=' + page, {
+    const graphqlQuery = {
+      query: `
+        query {
+          posts(page: ${page}) {
+            message
+            posts {
+              _id
+              title
+              content
+              imageUrl
+              createdAt
+              updatedAt
+              creator {
+                name
+              }
+            }
+            totalItems
+          }
+        }
+      `
+    }
+    fetch('http://localhost:8080/graphql', {
+      method: 'POST',
       headers: {
         Authorization: 'Bearer ' + this.props.token,
-      }
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(graphqlQuery)
     })
       .then(res => {
-        if (res.status !== 200) {
-          throw new Error('Failed to fetch posts.');
-        }
+        // if (res.status !== 200) {
+        //   throw new Error('Failed to fetch posts.');
+        // }
         return res.json();
       })
       .then(resData => {
+        console.log(resData);
         this.setState({
-          posts: resData.posts,
-          totalPosts: resData.totalItems,
+          posts: resData.data.posts.posts,
+          totalPosts: resData.data.posts.totalItems,
           postsLoading: false
         });
       })
@@ -162,10 +187,30 @@ class Feed extends Component {
     formData.append('title', postData.title);
     formData.append('content', postData.content);
     formData.append('image', postData.image);
-    let url = 'http://localhost:8080/feed/post';
+    const graphqlQuery = {
+      query: `
+        mutation {
+          createPost(postInput: { title: "${postData.title}", imageUrl: "www.google.com", content: "${postData.content}"}) {
+            message
+            post { 
+              title
+              content
+              imageUrl
+              createdAt
+              creator {
+                _id
+                name
+              }
+            }        
+          }
+        }
+      `,
+    };
+    let url = 'http://localhost:8080/graphql';
     let method = 'POST';
     let headers = {
       Authorization: 'Bearer ' + this.props.token,
+      'Content-Type': 'application/json'
     }
     if (this.state.editPost) {
       url = 'http://localhost:8080/feed/post/' + this.state.editPost._id;
@@ -174,22 +219,27 @@ class Feed extends Component {
 
     fetch(url, {
       method: method,
-      body: formData,
+      body: JSON.stringify(graphqlQuery),
       headers: headers
     })
       .then(res => {
-        if (res.status !== 200 && res.status !== 201) {
-          throw new Error('Creating or editing a post failed!');
-        }
+        // if (res.status !== 200 && res.status !== 201) {
+        //   throw new Error('Creating or editing a post failed!');
+        // }
         return res.json();
       })
       .then(resData => {
+        console.log(resData);
+        if (resData.errors) {
+          if ([422, 401].includes(resData.errors[0].status))  throw new Error(resData.errors[0].message);
+          else if (resData.errors[0].status !== 200 && resData.errors[0].status !== 201) throw new Error('Could not authenticate you!');
+        }
         const post = {
-          _id: resData.post._id,
-          title: resData.post.title,
-          content: resData.post.content,
-          creator: resData.post.creator,
-          createdAt: resData.post.createdAt
+          _id: resData.data.createPost.post._id,
+          title: resData.data.createPost.post.title,
+          content: resData.data.createPost.post.content,
+          creator: resData.data.createPost.post.creator,
+          createdAt: resData.data.createPost.post.createdAt
         };
         this.setState(prevState => {
           return {
